@@ -1,0 +1,18 @@
+# Build artifacts and binaries
+bin/
+build/
+*.o
+*.a
+*.so
+
+# Editor & OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Temporary logs & test artifacts
+*.log
+downloaded_*
+storage/downloaded_*
