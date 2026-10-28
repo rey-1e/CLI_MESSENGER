@@ -21,6 +21,8 @@ static void print_help(const char *prog)
     printf("  " COLOR_GREEN "send-file" COLOR_RESET " [peer] <filepath>   Send a file to peer\n");
     printf("  " COLOR_GREEN "fetch" COLOR_RESET "                       List received files in downloads/\n");
     printf("  " COLOR_GREEN "login" COLOR_RESET "                       Authenticate employee identity via browser portal\n");
+    printf("  " COLOR_GREEN "logout" COLOR_RESET "                      Clear active employee session and log out\n");
+    printf("  " COLOR_GREEN "whoami" COLOR_RESET "                      Display current active employee identity\n");
     printf("  " COLOR_GREEN "config" COLOR_RESET "                      View or modify user and network configuration\n");
     printf("  " COLOR_GREEN "daemon" COLOR_RESET " [start|stop|status]   Manage background daemon process\n");
     printf("  " COLOR_GREEN "clear" COLOR_RESET "                      Clear local chat history\n\n");
@@ -104,13 +106,48 @@ static int cmd_login(ctm_config_t *cfg)
         return 1;
     }
 
+    /* Switch active profile and config to the authenticated employee */
+    ctm_set_active_user(session.employee_name);
+    ctm_init_config(cfg, session.employee_name);
+
     char session_file[MAX_PATH_LEN];
     snprintf(session_file, sizeof(session_file), "%.480s/session.auth", cfg->base_dir);
     auth_save_session(session_file, &session);
+    ctm_save_config(cfg);
 
     printf(COLOR_GREEN "[ctm] Authentication verified for %s (%s) - %s.\n" COLOR_RESET,
            session.employee_name, session.employee_id, session.department);
+    printf(COLOR_GREEN "[ctm] Switched active profile to '%s'.\n" COLOR_RESET, session.employee_name);
     printf(COLOR_CYAN "[ctm] Active session stored in '%s'.\n" COLOR_RESET, session_file);
+    return 0;
+}
+
+static int cmd_whoami(ctm_config_t *cfg)
+{
+    char session_file[MAX_PATH_LEN];
+    snprintf(session_file, sizeof(session_file), "%.480s/session.auth", cfg->base_dir);
+    auth_session_t sess;
+    if (auth_load_session(session_file, &sess) == 0) {
+        printf(COLOR_BOLD "Current Active Employee:" COLOR_RESET "\n");
+        printf("  Name       : %s\n", sess.employee_name);
+        printf("  ID         : %s\n", sess.employee_id);
+        printf("  Department : %s\n", sess.department);
+        printf("  Profile    : %s\n", cfg->user_name);
+        printf("  Port       : %d\n", cfg->listen_port);
+        printf("  Daemon     : %s\n", ctm_is_daemon_running(cfg) ? COLOR_GREEN "Active" COLOR_RESET : COLOR_YELLOW "Stopped" COLOR_RESET);
+    } else {
+        printf(COLOR_YELLOW "[ctm] Active Profile: %s (Unauthenticated). Run 'ctm login'.\n" COLOR_RESET, cfg->user_name);
+    }
+    return 0;
+}
+
+static int cmd_logout(ctm_config_t *cfg)
+{
+    char session_file[MAX_PATH_LEN];
+    snprintf(session_file, sizeof(session_file), "%.480s/session.auth", cfg->base_dir);
+    unlink(session_file);
+    ctm_clear_active_user();
+    printf(COLOR_GREEN "[ctm] Logged out. Active session cleared.\n" COLOR_RESET);
     return 0;
 }
 
@@ -355,6 +392,10 @@ int main(int argc, char *argv[])
         return cmd_fetch(&cfg);
     } else if (strcmp(command, "login") == 0 || strcmp(command, "auth") == 0) {
         return cmd_login(&cfg);
+    } else if (strcmp(command, "logout") == 0) {
+        return cmd_logout(&cfg);
+    } else if (strcmp(command, "whoami") == 0) {
+        return cmd_whoami(&cfg);
     } else if (strcmp(command, "config") == 0) {
         return cmd_config(&cfg, sub_argc, sub_argv);
     } else if (strcmp(command, "daemon") == 0) {

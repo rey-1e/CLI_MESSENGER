@@ -60,6 +60,26 @@ typedef struct {
 void ctm_init_config(ctm_config_t *cfg, const char *user_override);
 
 /**
+ * @brief Retrieves currently logged-in active employee username.
+ */
+int ctm_get_active_user(char *out_username, size_t max_len);
+
+/**
+ * @brief Sets currently logged-in active employee username.
+ */
+int ctm_set_active_user(const char *username);
+
+/**
+ * @brief Clears active user session.
+ */
+int ctm_clear_active_user(void);
+
+/**
+ * @brief Resolves default TCP listen port for any known employee identity.
+ */
+int ctm_resolve_peer_port(const char *peer_name);
+
+/**
  * @brief Loads user configuration from ~/.ctm/<user>/config.
  */
 int ctm_load_config(ctm_config_t *cfg);

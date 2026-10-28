@@ -6,6 +6,7 @@
 #include "ctm.h"
 #include "protocol.h"
 #include <pwd.h>
+#include <ctype.h>
 
 static void ctm_mkdir_p(const char *dir)
 {
@@ -25,11 +26,94 @@ static void ctm_mkdir_p(const char *dir)
     mkdir(tmp, 0775);
 }
 
+int ctm_resolve_peer_port(const char *peer_name)
+{
+    if (!peer_name) return CTM_DEFAULT_PORT;
+    if (strcasecmp(peer_name, "Alice") == 0) return 8088;
+    if (strcasecmp(peer_name, "Bob") == 0) return 8089;
+    if (strcasecmp(peer_name, "Charlie") == 0) return 8090;
+    if (strcasecmp(peer_name, "Rey") == 0) return 8091;
+    if (strcasecmp(peer_name, "Admin") == 0) return 8092;
+
+    /* Deterministic hash for any dynamic employee username */
+    unsigned int hash = 5381;
+    const unsigned char *p = (const unsigned char *)peer_name;
+    while (*p) {
+        hash = ((hash << 5) + hash) + tolower(*p++);
+    }
+    return 8100 + (hash % 100);
+}
+
+int ctm_get_active_user(char *out_username, size_t max_len)
+{
+    if (!out_username || max_len == 0) return -1;
+    out_username[0] = '\0';
+
+    const char *homedir = getenv("HOME");
+    if (!homedir) {
+        struct passwd *pw = getpwuid(getuid());
+        homedir = pw ? pw->pw_dir : "/tmp";
+    }
+
+    char active_path[MAX_PATH_LEN];
+    snprintf(active_path, sizeof(active_path), "%s/.ctm/current_user", homedir);
+
+    FILE *fp = fopen(active_path, "r");
+    if (!fp) return -1;
+
+    if (fgets(out_username, max_len, fp)) {
+        proto_strip_newline(out_username);
+        fclose(fp);
+        return (strlen(out_username) > 0) ? 0 : -1;
+    }
+    fclose(fp);
+    return -1;
+}
+
+int ctm_set_active_user(const char *username)
+{
+    if (!username || strlen(username) == 0) return -1;
+
+    const char *homedir = getenv("HOME");
+    if (!homedir) {
+        struct passwd *pw = getpwuid(getuid());
+        homedir = pw ? pw->pw_dir : "/tmp";
+    }
+
+    char ctm_root[MAX_PATH_LEN];
+    snprintf(ctm_root, sizeof(ctm_root), "%s/.ctm", homedir);
+    ctm_mkdir_p(ctm_root);
+
+    char active_path[MAX_PATH_LEN];
+    snprintf(active_path, sizeof(active_path), "%s/.ctm/current_user", homedir);
+
+    FILE *fp = fopen(active_path, "w");
+    if (!fp) return -1;
+
+    fprintf(fp, "%s\n", username);
+    fclose(fp);
+    return 0;
+}
+
+int ctm_clear_active_user(void)
+{
+    const char *homedir = getenv("HOME");
+    if (!homedir) {
+        struct passwd *pw = getpwuid(getuid());
+        homedir = pw ? pw->pw_dir : "/tmp";
+    }
+
+    char active_path[MAX_PATH_LEN];
+    snprintf(active_path, sizeof(active_path), "%s/.ctm/current_user", homedir);
+    unlink(active_path);
+    return 0;
+}
+
 void ctm_init_config(ctm_config_t *cfg, const char *user_override)
 {
     memset(cfg, 0, sizeof(*cfg));
 
-    /* Determine user name */
+    /* Determine user name: Flag > Env > Active Logged-in User > Default */
     if (user_override && strlen(user_override) > 0) {
         snprintf(cfg->user_name, sizeof(cfg->user_name), "%s", user_override);
     } else {
@@ -37,20 +121,24 @@ void ctm_init_config(ctm_config_t *cfg, const char *user_override)
         if (env_user && strlen(env_user) > 0) {
             snprintf(cfg->user_name, sizeof(cfg->user_name), "%s", env_user);
         } else {
-            snprintf(cfg->user_name, sizeof(cfg->user_name), "Alice");
+            char active_user[CTM_MAX_NAME_LEN] = {0};
+            if (ctm_get_active_user(active_user, sizeof(active_user)) == 0) {
+                snprintf(cfg->user_name, sizeof(cfg->user_name), "%s", active_user);
+            } else {
+                snprintf(cfg->user_name, sizeof(cfg->user_name), "Alice");
+            }
         }
     }
 
     /* Assign default ports and peer */
+    cfg->listen_port = ctm_resolve_peer_port(cfg->user_name);
+
     if (strcasecmp(cfg->user_name, "Bob") == 0) {
-        cfg->listen_port = 8089;
         snprintf(cfg->peer_name, sizeof(cfg->peer_name), "Alice");
-        cfg->peer_port = 8088;
     } else {
-        cfg->listen_port = 8088;
         snprintf(cfg->peer_name, sizeof(cfg->peer_name), "Bob");
-        cfg->peer_port = 8089;
     }
+    cfg->peer_port = ctm_resolve_peer_port(cfg->peer_name);
     snprintf(cfg->peer_ip, sizeof(cfg->peer_ip), "127.0.0.1");
 
     /* Base directory: ~/.ctm/<user_name> */

@@ -1,19 +1,23 @@
 /**
  * @file server_main.c
- * @brief Main entry point for the Chat Messenger Relay Server.
+ * @brief Main entry point for the Corporate Group Chat (GC) Relay Server.
  */
 
 #include "chat_server.h"
 #include "network.h"
 
 static int g_listen_fd = -1;
+static chat_room_t g_room;
 
 static void handle_sigint(int sig)
 {
     (void)sig;
-    const char msg[] = "\nShutting down Chat Server...\n";
+    const char msg[] = "\nShutting down Corporate Group Chat Server...\n";
     ssize_t w = write(STDOUT_FILENO, msg, sizeof(msg) - 1);
     (void)w;
+
+    chat_room_shutdown(&g_room);
+
     if (g_listen_fd >= 0) {
         close(g_listen_fd);
         g_listen_fd = -1;
@@ -25,6 +29,8 @@ int main(int argc, char *argv[])
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
     signal(SIGINT, handle_sigint);
+    /* Ignore SIGPIPE so write to disconnected client doesn't crash the server */
+    signal(SIGPIPE, SIG_IGN);
 
     int port = DEFAULT_CHAT_PORT;
 
@@ -45,26 +51,46 @@ int main(int argc, char *argv[])
         }
     }
 
-    LOG_INFO("Initializing Chat Server on port %d...", port);
+    LOG_INFO("Initializing Corporate Group Chat Server on port %d...", port);
     net_clean_port(port);
 
-    g_listen_fd = net_create_server_socket(port, 10);
+    g_listen_fd = net_create_server_socket(port, 20);
     if (g_listen_fd < 0) {
         LOG_ERROR("Could not start server on port %d", port);
         return EXIT_FAILURE;
     }
 
-    LOG_INFO("Chat Server is listening on port %d. Waiting for peer pairs...", port);
+    chat_room_init(&g_room);
+    g_room.listen_fd = g_listen_fd;
 
-    while (1) {
-        int client1_fd = -1;
-        int client2_fd = -1;
+    LOG_INFO("Corporate Group Chat Server active on port %d (Max Capacity: %d employees).",
+             port, MAX_CHAT_CLIENTS);
 
-        if (server_accept_client_pair(g_listen_fd, &client1_fd, &client2_fd) == 0) {
-            server_start_relay_session(client1_fd, client2_fd);
+    while (g_room.running) {
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+
+        int client_fd = accept(g_listen_fd, (struct sockaddr *)&client_addr, &addr_len);
+        if (client_fd < 0) {
+            if (errno == EINTR) continue;
+            LOG_ERROR("accept() failed: %s", strerror(errno));
+            break;
+        }
+
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+        int client_port = ntohs(client_addr.sin_port);
+
+        if (chat_room_add_client(&g_room, client_fd, client_ip, client_port) < 0) {
+            LOG_WARN("Connection from %s:%d rejected: room capacity reached (%d).",
+                     client_ip, client_port, MAX_CHAT_CLIENTS);
+            const char *full_msg = "\n" COLOR_RED "*** [SYSTEM] Corporate group chat room is full. Try again later. ***" COLOR_RESET "\n";
+            send(client_fd, full_msg, strlen(full_msg), MSG_NOSIGNAL);
+            close(client_fd);
         }
     }
 
+    chat_room_shutdown(&g_room);
     net_close_socket(&g_listen_fd);
     return EXIT_SUCCESS;
 }

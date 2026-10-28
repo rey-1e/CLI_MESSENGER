@@ -26,14 +26,29 @@ void *chat_client_send_worker(void *arg)
 
         /* Check for exit command */
         if (strcmp(message, "/exit") == 0 || strcmp(message, "/quit") == 0) {
-            printf("\nExiting chat session...\n");
+            proto_send_all(client->socket_fd, "/exit\n", 6);
+            printf("\nExiting corporate group chat session...\n");
             break;
+        }
+
+        /* Check for slash commands */
+        if (strcmp(message, "/who") == 0 || strcmp(message, "/users") == 0 || strcmp(message, "/list") == 0) {
+            proto_send_all(client->socket_fd, "/who\n", 5);
+            continue;
+        }
+
+        if (strcmp(message, "/help") == 0) {
+            printf("\n" COLOR_BOLD "Group Chat Commands:" COLOR_RESET "\n");
+            printf("  " COLOR_CYAN "/who" COLOR_RESET "   - List all online employees in this chat room\n");
+            printf("  " COLOR_CYAN "/help" COLOR_RESET "  - Display this command menu\n");
+            printf("  " COLOR_CYAN "/exit" COLOR_RESET "  - Gracefully leave the group chat\n\n");
+            continue;
         }
 
         snprintf(payload, sizeof(payload), "%s: %s\n", client->username, message);
 
         if (proto_send_all(client->socket_fd, payload, strlen(payload)) < 0) {
-            LOG_ERROR("Failed to send message");
+            LOG_ERROR("Failed to send message to server");
             break;
         }
     }
@@ -57,7 +72,7 @@ void *chat_client_recv_worker(void *arg)
 
         if (bytes_read <= 0) {
             if (client->running) {
-                printf("\n" COLOR_YELLOW "[NOTICE] Disconnected from server." COLOR_RESET "\n");
+                printf("\n" COLOR_YELLOW "[NOTICE] Disconnected from Corporate Group Chat Server." COLOR_RESET "\n");
                 fflush(stdout);
                 client->running = false;
                 exit(0);
@@ -83,8 +98,17 @@ int chat_client_run(chat_client_t *client)
 
     g_client_sock = client->socket_fd;
     client->running = true;
-    LOG_INFO("Connected to server! Starting interactive chat session as '%s'.", client->username);
-    LOG_INFO("Type your message and press ENTER. Type /exit to quit.");
+
+    /* Handshake: register authenticated identity with group chat server */
+    char join_pkt[MAX_USERNAME_LEN + 16];
+    snprintf(join_pkt, sizeof(join_pkt), "JOIN %s\n", client->username);
+    if (proto_send_all(client->socket_fd, join_pkt, strlen(join_pkt)) < 0) {
+        LOG_ERROR("Failed to complete group chat registration handshake");
+        net_close_socket(&client->socket_fd);
+        return -1;
+    }
+
+    LOG_INFO("Connected to Corporate Group Chat Server at %s:%d!", client->server_ip, client->port);
     fflush(stdout);
 
     pthread_t send_thread, recv_thread;
@@ -110,7 +134,7 @@ int chat_client_run(chat_client_t *client)
 
     net_close_socket(&client->socket_fd);
     g_client_sock = -1;
-    LOG_INFO("Chat session closed.");
+    LOG_INFO("Corporate chat session closed.");
     fflush(stdout);
     return 0;
 }

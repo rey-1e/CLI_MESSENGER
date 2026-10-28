@@ -17,14 +17,10 @@ static void daemon_signal_handler(int sig)
 
 static int ctm_connect_or_spawn_local(const ctm_config_t *cfg, const char *peer_name)
 {
-    int sock = net_connect_to_server(cfg->peer_ip, cfg->peer_port);
-    if (sock < 0 && (strcmp(cfg->peer_ip, "127.0.0.1") == 0 || strcmp(cfg->peer_ip, "localhost") == 0)) {
-        ctm_config_t peer_cfg;
-        ctm_init_config(&peer_cfg, peer_name);
-        ctm_ensure_daemon(&peer_cfg);
-        sock = net_connect_to_server(cfg->peer_ip, cfg->peer_port);
-    }
-    return sock;
+    int port = ctm_resolve_peer_port(peer_name);
+    if (port <= 0) port = cfg->peer_port;
+
+    return net_connect_to_server(cfg->peer_ip, port);
 }
 
 static void ctm_process_outbox(const ctm_config_t *cfg)
