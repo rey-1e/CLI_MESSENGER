@@ -23,9 +23,13 @@ static void handle_sigint(int sig)
 
 int main(int argc, char *argv[])
 {
+    setvbuf(stdout, NULL, _IOLBF, 0);
     signal(SIGINT, handle_sigint);
     /* Prevent zombie child processes by auto-reaping */
     signal(SIGCHLD, SIG_IGN);
+
+    /* Ensure storage directory exists */
+    mkdir(STORAGE_DIRECTORY, 0775);
 
     int port = DEFAULT_FTP_PORT;
 

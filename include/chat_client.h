@@ -19,6 +19,8 @@ typedef struct {
     volatile bool running;
 } chat_client_t;
 
+extern int g_client_sock;
+
 /**
  * @brief Initializes and runs the client chat session.
  * 

@@ -27,25 +27,73 @@ int server_accept_client_pair(int listen_fd, int *client1_fd, int *client2_fd)
     char ip1[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &addr1.sin_addr, ip1, sizeof(ip1));
     LOG_SERVER("Client 1 connected from %s:%d", ip1, ntohs(addr1.sin_port));
-    proto_send_all(*client1_fd, msg_wait, strlen(msg_wait));
-
-    LOG_SERVER("Waiting for Client 2 connection...");
-    *client2_fd = accept(listen_fd, (struct sockaddr *)&addr2, &len2);
-    if (*client2_fd < 0) {
-        if (errno == EINTR) {
-            net_close_socket(client1_fd);
-            return -1;
-        }
-        LOG_ERROR("Failed to accept Client 2");
+    if (proto_send_all(*client1_fd, msg_wait, strlen(msg_wait)) < 0) {
+        LOG_WARN("Failed to send initial greeting to Client 1");
         net_close_socket(client1_fd);
         return -1;
     }
+
+    LOG_SERVER("Waiting for Client 2 connection...");
+
+    while (1) {
+        struct pollfd fds[2];
+        fds[0].fd = listen_fd;
+        fds[0].events = POLLIN;
+        fds[1].fd = *client1_fd;
+        fds[1].events = POLLIN | POLLHUP | POLLRDHUP;
+
+        int poll_ret = poll(fds, 2, -1);
+        if (poll_ret < 0) {
+            if (errno == EINTR) continue;
+            LOG_ERROR("poll() failed while waiting for Client 2");
+            net_close_socket(client1_fd);
+            return -1;
+        }
+
+        /* Check if Client 1 disconnected while waiting */
+        if (fds[1].revents & (POLLIN | POLLHUP | POLLRDHUP | POLLERR)) {
+            char peek_buf[32];
+            ssize_t n = recv(*client1_fd, peek_buf, sizeof(peek_buf), MSG_PEEK | MSG_DONTWAIT);
+            if (n <= 0) {
+                LOG_SERVER("Client 1 disconnected while waiting for peer. Resetting...");
+                net_close_socket(client1_fd);
+                return -1;
+            }
+        }
+
+        /* Check if Client 2 joined */
+        if (fds[0].revents & POLLIN) {
+            *client2_fd = accept(listen_fd, (struct sockaddr *)&addr2, &len2);
+            if (*client2_fd < 0) {
+                if (errno == EINTR) continue;
+                LOG_ERROR("Failed to accept Client 2");
+                net_close_socket(client1_fd);
+                return -1;
+            }
+            break;
+        }
+    }
+
     char ip2[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &addr2.sin_addr, ip2, sizeof(ip2));
     LOG_SERVER("Client 2 connected from %s:%d", ip2, ntohs(addr2.sin_port));
 
-    proto_send_all(*client2_fd, msg_c2, strlen(msg_c2));
-    proto_send_all(*client1_fd, msg_start, strlen(msg_start));
+    /* Verify Client 1 is still responsive; promote Client 2 if Client 1 dropped */
+    if (proto_send_all(*client1_fd, msg_start, strlen(msg_start)) < 0) {
+        LOG_WARN("Client 1 dropped just as Client 2 connected. Promoting Client 2 to Client 1.");
+        net_close_socket(client1_fd);
+        *client1_fd = *client2_fd;
+        *client2_fd = -1;
+        proto_send_all(*client1_fd, msg_wait, strlen(msg_wait));
+        return -1;
+    }
+
+    if (proto_send_all(*client2_fd, msg_c2, strlen(msg_c2)) < 0) {
+        LOG_WARN("Failed to send start message to Client 2");
+        net_close_socket(client2_fd);
+        proto_send_all(*client1_fd, msg_wait, strlen(msg_wait));
+        return -1;
+    }
 
     return 0;
 }
@@ -71,8 +119,8 @@ void *server_relay_worker(void *arg)
         }
     }
 
-    if (*(args->session_active)) {
-        *(args->session_active) = false;
+    /* Thread-safe atomic flag swap: only one worker thread triggers disconnect handling */
+    if (__atomic_exchange_n(args->session_active, false, __ATOMIC_SEQ_CST)) {
         LOG_SERVER("%s disconnected.", args->sender_tag);
         const char *notify = "\n[SERVER] Peer disconnected from chat.\n";
         proto_send_all(receiver, notify, strlen(notify));

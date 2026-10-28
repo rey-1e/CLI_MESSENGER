@@ -23,6 +23,7 @@ static void handle_sigint(int sig)
 
 int main(int argc, char *argv[])
 {
+    setvbuf(stdout, NULL, _IOLBF, 0);
     signal(SIGINT, handle_sigint);
 
     int port = DEFAULT_CHAT_PORT;

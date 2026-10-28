@@ -27,8 +27,6 @@ void *chat_client_send_worker(void *arg)
         /* Check for exit command */
         if (strcmp(message, "/exit") == 0 || strcmp(message, "/quit") == 0) {
             printf("\nExiting chat session...\n");
-            client->running = false;
-            shutdown(client->socket_fd, SHUT_RDWR);
             break;
         }
 
@@ -41,6 +39,9 @@ void *chat_client_send_worker(void *arg)
     }
 
     client->running = false;
+    if (client->socket_fd >= 0) {
+        shutdown(client->socket_fd, SHUT_RDWR);
+    }
     return NULL;
 }
 
@@ -57,9 +58,9 @@ void *chat_client_recv_worker(void *arg)
         if (bytes_read <= 0) {
             if (client->running) {
                 printf("\n" COLOR_YELLOW "[NOTICE] Disconnected from server." COLOR_RESET "\n");
+                fflush(stdout);
                 client->running = false;
-                /* Quick exit on server termination */
-                _exit(0);
+                exit(0);
             }
             break;
         }
@@ -80,15 +81,18 @@ int chat_client_run(chat_client_t *client)
         return -1;
     }
 
+    g_client_sock = client->socket_fd;
     client->running = true;
     LOG_INFO("Connected to server! Starting interactive chat session as '%s'.", client->username);
     LOG_INFO("Type your message and press ENTER. Type /exit to quit.");
+    fflush(stdout);
 
     pthread_t send_thread, recv_thread;
 
     if (pthread_create(&send_thread, NULL, chat_client_send_worker, client) != 0) {
         LOG_ERROR("Failed to create send worker thread");
         net_close_socket(&client->socket_fd);
+        g_client_sock = -1;
         return -1;
     }
 
@@ -97,6 +101,7 @@ int chat_client_run(chat_client_t *client)
         client->running = false;
         pthread_cancel(send_thread);
         net_close_socket(&client->socket_fd);
+        g_client_sock = -1;
         return -1;
     }
 
@@ -104,6 +109,8 @@ int chat_client_run(chat_client_t *client)
     pthread_join(recv_thread, NULL);
 
     net_close_socket(&client->socket_fd);
+    g_client_sock = -1;
     LOG_INFO("Chat session closed.");
+    fflush(stdout);
     return 0;
 }

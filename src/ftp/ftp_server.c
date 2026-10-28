@@ -35,6 +35,21 @@ int ftp_server_serve_file(int client_fd, const char *storage_dir)
         snprintf(full_path, sizeof(full_path), "%s", filename);
     }
 
+    /* Fallback search if launched from bin/ or a sibling directory */
+    if (stat(full_path, &st) < 0 || !S_ISREG(st.st_mode)) {
+        char alt_path[MAX_PATH_LEN];
+        snprintf(alt_path, sizeof(alt_path), "../%s/%s",
+                 (storage_dir && strlen(storage_dir) > 0) ? storage_dir : "storage", filename);
+        if (stat(alt_path, &st) == 0 && S_ISREG(st.st_mode)) {
+            snprintf(full_path, sizeof(full_path), "%s", alt_path);
+        } else {
+            snprintf(alt_path, sizeof(alt_path), "%s", filename);
+            if (stat(alt_path, &st) == 0 && S_ISREG(st.st_mode)) {
+                snprintf(full_path, sizeof(full_path), "%s", alt_path);
+            }
+        }
+    }
+
     LOG_INFO("FTP: Client requested file: '%s' (Resolved: '%s')", filename, full_path);
 
     /* Step 2: Check if file exists and get size */

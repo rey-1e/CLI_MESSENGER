@@ -23,6 +23,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <poll.h>
 
 #define DEFAULT_CHAT_PORT   8080
 #define DEFAULT_FTP_PORT    9000

@@ -6,6 +6,21 @@
 #include "ftp.h"
 #include "protocol.h"
 
+static void ensure_parent_directory(const char *path)
+{
+    if (!path) return;
+    char dir[MAX_PATH_LEN];
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *last_slash = strrchr(dir, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        char cmd[MAX_PATH_LEN + 64];
+        snprintf(cmd, sizeof(cmd), "mkdir -p '%s' 2>/dev/null", dir);
+        int r = system(cmd);
+        (void)r;
+    }
+}
+
 int ftp_client_download_file(int server_fd, const char *remote_filename, const char *local_filename)
 {
     char request_buf[MAX_FILENAME_LEN + 2];
@@ -41,7 +56,8 @@ int ftp_client_download_file(int server_fd, const char *remote_filename, const c
     LOG_INFO("Server confirmed file '%s' (Size: %ld bytes). Starting download...",
              remote_filename, file_size);
 
-    /* Step 3: Open destination file */
+    /* Step 3: Ensure parent directory exists and open destination file */
+    ensure_parent_directory(local_filename);
     int out_fd = open(local_filename, O_CREAT | O_WRONLY | O_TRUNC, 0664);
     if (out_fd < 0) {
         LOG_ERROR("Failed to create destination file '%s'", local_filename);

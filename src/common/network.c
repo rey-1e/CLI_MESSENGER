@@ -24,7 +24,7 @@ void net_clean_port(int port)
 {
     char command[256];
     snprintf(command, sizeof(command),
-             "lsof -ti tcp:%d 2>/dev/null | grep -v %d | xargs kill -9 2>/dev/null",
+             "lsof -ti tcp:%d 2>/dev/null | grep -vw %d | xargs -r kill -9 2>/dev/null",
              port, getpid());
     int ret = system(command);
     (void)ret;
@@ -72,19 +72,21 @@ int net_connect_to_server(const char *ip, int port)
         return -1;
     }
 
+    const char *target_ip = (ip && strcmp(ip, "localhost") == 0) ? "127.0.0.1" : ip;
+
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
 
-    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) {
-        LOG_WARN("Invalid IP address: %s", ip);
+    if (inet_pton(AF_INET, target_ip, &server_addr.sin_addr) <= 0) {
+        LOG_WARN("Invalid IP address: %s", target_ip);
         close(fd);
         return -1;
     }
 
     if (connect(fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        LOG_ERROR("connect() to %s:%d failed", ip, port);
+        LOG_ERROR("connect() to %s:%d failed", target_ip, port);
         close(fd);
         return -1;
     }
