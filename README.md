@@ -1,8 +1,9 @@
-# Chat Messenger & Concurrent FTP System
+# Chat Messenger, Concurrent FTP & CTM CLI Suite
 
-A high-performance, modular Linux system programming suite implemented in C. The repository features two complementary network subsystems:
+A high-performance, modular Linux system programming suite implemented in C. The repository features three complementary network subsystems:
 1. **Chat Messenger**: A full-duplex, peer-to-peer relay messaging service utilizing POSIX threads (`pthreads`) for non-blocking asynchronous transmission.
 2. **Concurrent FTP System**: A multi-client file transfer service employing process-based concurrency (`fork`) with chunked TCP streaming and protocol header verification.
+3. **CTM (Chat Messenger CLI)**: An asynchronous, Git-style command-line messenger powered by an auto-spawning background Linux daemon, Unix domain socket (`AF_UNIX`) IPC, and persistent kernel-locked (`flock`) conversation history.
 
 ---
 
@@ -152,6 +153,72 @@ The FTP service serves files located inside the `storage/` directory over TCP.
 ```bash
 diff storage/demo.txt storage/downloaded_demo.txt
 # No differences means the file was transferred with 100% integrity
+```
+
+---
+
+### 3. CTM (Git-Style Asynchronous CLI Messenger)
+
+CTM provides an asynchronous terminal workflow (`ctm text`, `ctm updates`, `ctm log`, `ctm send-file`, `ctm fetch`). It requires **zero manual server startup** — the background daemon auto-spawns via `fork()` + `setsid()` and saves persistent chat history with kernel file locking (`flock`).
+
+#### Quick Setup & Installation
+```bash
+make install
+# Installs 'ctm' binary to ~/.local/bin/ctm
+```
+
+#### Commands & Examples
+
+**1. Configure peer identity:**
+```bash
+# On Alice's machine:
+ctm config --name Alice --peer Bob --peer-ip 192.168.1.25
+
+# On Bob's machine:
+ctm config --name Bob --peer Alice --peer-ip 192.168.1.10
+```
+
+**2. Send a message (returns immediately):**
+```bash
+ctm text Bob -m "I'm working on the project!"
+# [ctm] Message delivered to Bob.
+```
+
+**3. Check for unread message notifications:**
+```bash
+ctm updates
+# [ctm] 1 unread message from Alice
+# Last: "I'm working on the project!"
+```
+
+**4. View conversation history (marks unread as read):**
+```bash
+ctm log -n 10
+# --- Conversation History (Bob & Alice) ---
+# [22:50] Alice : I'm working on the project!
+# [22:51] Bob   : Awesome! I just finished the test suite.
+```
+
+**5. Send a file without opening a server:**
+```bash
+ctm send-file Bob storage/demo.txt
+# [ctm] Sent file 'demo.txt' (4470 bytes) to Bob.
+```
+
+**6. View downloaded files:**
+```bash
+ctm fetch
+# Received Files in '~/.ctm/Bob/downloads/':
+#   • demo.txt                       (4470 bytes)
+```
+
+**7. Single-machine testing:**
+You can test both Alice and Bob simultaneously on a single laptop using the `--user` flag:
+```bash
+ctm --user Alice text Bob -m "Hello from Alice!"
+ctm --user Bob updates
+ctm --user Bob log
+ctm --user Bob text Alice -m "Hello back from Bob!"
 ```
 
 ---
