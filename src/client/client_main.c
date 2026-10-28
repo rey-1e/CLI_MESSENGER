@@ -96,6 +96,27 @@ int main(int argc, char *argv[])
         }
     }
 
+    /* Mandatory Employee Browser Authentication Gate */
+    printf("\n" COLOR_BOLD "========================================================================" COLOR_RESET "\n");
+    printf(COLOR_CYAN COLOR_BOLD "  CORPORATE SECURITY: EMPLOYEE AUTHENTICATION SESSION" COLOR_RESET "\n");
+    printf(COLOR_BOLD "========================================================================" COLOR_RESET "\n");
+    printf("  To protect corporate privacy and communication integrity, each session\n");
+    printf("  requires browser-based identity confirmation with your Employee ID.\n");
+
+    auth_session_t auth_session;
+    if (auth_browser_login(client.username, &auth_session) != 0) {
+        printf("\n" COLOR_RED "[SECURITY ALERT] Employee authentication failed or was cancelled." COLOR_RESET "\n");
+        printf(COLOR_RED "[ACCESS DENIED] Non-employees cannot access the chat service.\n\n" COLOR_RESET);
+        return EXIT_FAILURE;
+    }
+
+    /* Attach confirmed employee identity */
+    snprintf(client.username, sizeof(client.username), "%.30s (%.15s)",
+             auth_session.employee_name, auth_session.employee_id);
+    client.auth_session = auth_session;
+    LOG_INFO("Access granted for employee '%s' [%s]. Initializing relay connection...",
+             client.username, auth_session.department);
+
     int status = chat_client_run(&client);
     return (status == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

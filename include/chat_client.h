@@ -7,6 +7,7 @@
 #define CHAT_CLIENT_H
 
 #include "common.h"
+#include "auth.h"
 
 /**
  * @brief Context configuration for the chat client.
@@ -17,6 +18,7 @@ typedef struct {
     char username[MAX_USERNAME_LEN];
     int socket_fd;
     volatile bool running;
+    auth_session_t auth_session;
 } chat_client_t;
 
 extern int g_client_sock;

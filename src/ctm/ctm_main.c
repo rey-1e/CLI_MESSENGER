@@ -5,6 +5,7 @@
 
 #include "ctm.h"
 #include "protocol.h"
+#include "auth.h"
 #include <getopt.h>
 
 static void print_help(const char *prog)
@@ -19,6 +20,7 @@ static void print_help(const char *prog)
     printf("  " COLOR_GREEN "log" COLOR_RESET " [-n <count>]             View chat history (marks unread as read)\n");
     printf("  " COLOR_GREEN "send-file" COLOR_RESET " [peer] <filepath>   Send a file to peer\n");
     printf("  " COLOR_GREEN "fetch" COLOR_RESET "                       List received files in downloads/\n");
+    printf("  " COLOR_GREEN "login" COLOR_RESET "                       Authenticate employee identity via browser portal\n");
     printf("  " COLOR_GREEN "config" COLOR_RESET "                      View or modify user and network configuration\n");
     printf("  " COLOR_GREEN "daemon" COLOR_RESET " [start|stop|status]   Manage background daemon process\n");
     printf("  " COLOR_GREEN "clear" COLOR_RESET "                      Clear local chat history\n\n");
@@ -46,6 +48,15 @@ static int cmd_config(ctm_config_t *cfg, int argc, char *argv[])
         printf("  Socket Path      : %s\n", cfg->sock_path);
         printf("  History File     : %s\n", cfg->history_path);
         printf("  Downloads Dir    : %s\n", cfg->downloads_dir);
+
+        char session_file[MAX_PATH_LEN];
+        snprintf(session_file, sizeof(session_file), "%.480s/session.auth", cfg->base_dir);
+        auth_session_t sess;
+        if (auth_load_session(session_file, &sess) == 0) {
+            printf("  Employee Status  : " COLOR_GREEN "Verified (%s - %s)" COLOR_RESET "\n", sess.employee_id, sess.department);
+        } else {
+            printf("  Employee Status  : " COLOR_YELLOW "Unauthenticated (run 'ctm login')" COLOR_RESET "\n");
+        }
         return 0;
     }
 
@@ -81,6 +92,25 @@ static int cmd_config(ctm_config_t *cfg, int argc, char *argv[])
         printf("Usage: ctm config [--name <name>] [--peer <peer>] [--peer-ip <ip>] [--port <port>] [--peer-port <port>]\n");
     }
 
+    return 0;
+}
+
+static int cmd_login(ctm_config_t *cfg)
+{
+    printf(COLOR_BOLD "CTM Secure Employee Authentication Portal" COLOR_RESET "\n");
+    auth_session_t session;
+    if (auth_browser_login(cfg->user_name, &session) != 0) {
+        printf(COLOR_RED "[ctm] Employee authentication failed or was cancelled.\n" COLOR_RESET);
+        return 1;
+    }
+
+    char session_file[MAX_PATH_LEN];
+    snprintf(session_file, sizeof(session_file), "%.480s/session.auth", cfg->base_dir);
+    auth_save_session(session_file, &session);
+
+    printf(COLOR_GREEN "[ctm] Authentication verified for %s (%s) - %s.\n" COLOR_RESET,
+           session.employee_name, session.employee_id, session.department);
+    printf(COLOR_CYAN "[ctm] Active session stored in '%s'.\n" COLOR_RESET, session_file);
     return 0;
 }
 
@@ -323,6 +353,8 @@ int main(int argc, char *argv[])
         return cmd_send_file(&cfg, sub_argc, sub_argv);
     } else if (strcmp(command, "fetch") == 0) {
         return cmd_fetch(&cfg);
+    } else if (strcmp(command, "login") == 0 || strcmp(command, "auth") == 0) {
+        return cmd_login(&cfg);
     } else if (strcmp(command, "config") == 0) {
         return cmd_config(&cfg, sub_argc, sub_argv);
     } else if (strcmp(command, "daemon") == 0) {

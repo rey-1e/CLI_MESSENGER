@@ -13,8 +13,9 @@ This directory serves as the **central server-side file repository** for the Con
                                 │ Serves files from:
                                 ▼
                        storage/ (Server Repo)
-                       ├── demo.txt   (Text)
-                       └── image.jpg  (Binary)
+                       ├── employees.txt (Employee Registry)
+                       ├── demo.txt      (Text)
+                       └── image.jpg     (Binary)
                                 │
              TCP Stream (Port 9000, 1024-byte chunks)
                                 │
@@ -32,6 +33,7 @@ This directory serves as the **central server-side file repository** for the Con
 
 | File | Type | Size | Purpose |
 |---|---|---|---|
+| `employees.txt` | Text / Config | ~300 B | Corporate employee credential registry for browser authentication. |
 | `demo.txt` | ASCII Text | ~4.4 KB | Tests text streaming, line-ending preservation, and EOF handling. |
 | `image.jpg` | Binary JPEG | ~20.1 KB | Tests byte-exact binary chunking across multiple TCP segments. |
 

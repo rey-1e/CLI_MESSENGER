@@ -1,0 +1,10 @@
+# ==============================================================================
+# Enterprise Employee Credential Registry
+# Operating Systems Secure Chat Messenger & Systems Suite
+# Format: employee_id:password:employee_name:department
+# ==============================================================================
+EMP001:alice123:Alice:Engineering
+EMP002:bob123:Bob:Security Operations
+EMP003:charlie123:Charlie:Systems Architecture
+EMP101:osproject2026:Rey:Kernel Development
+EMP102:adminpass:Administrator:IT Infrastructure
