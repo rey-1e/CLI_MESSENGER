@@ -17,9 +17,9 @@ static void print_usage(const char *prog_name)
     printf("  server_ip        IP address of FTP server (default: 127.0.0.1)\n");
     printf("  port             Port number where FTP server is listening (default: 9000)\n");
     printf("  remote_filename  Name of the target file hosted on server\n");
-    printf("  local_filename   Destination file path (default: downloaded_<remote_filename>)\n\n");
+    printf("  local_filename   Destination file path (default: downloads/<remote_filename>)\n\n");
     printf("Examples:\n");
-    printf("  %s 127.0.0.1 9000 demo.txt downloaded_demo.txt\n", prog_name);
+    printf("  %s 127.0.0.1 9000 demo.txt downloads/demo.txt\n", prog_name);
     printf("  %s 127.0.0.1 9000 demo.txt\n", prog_name);
     printf("  %s demo.txt\n", prog_name);
 }
@@ -42,11 +42,11 @@ int main(int argc, char *argv[])
         snprintf(server_ip, sizeof(server_ip), "%.15s", argv[1]);
         port = atoi(argv[2]);
         snprintf(remote_file, sizeof(remote_file), "%s", argv[3]);
-        snprintf(local_file, sizeof(local_file), "downloaded_%s", remote_file);
+        snprintf(local_file, sizeof(local_file), "downloads/%s", remote_file);
     } else if (argc == 2) {
         /* Single argument convenience: ./bin/ftp_client <filename> */
         snprintf(remote_file, sizeof(remote_file), "%s", argv[1]);
-        snprintf(local_file, sizeof(local_file), "downloaded_%s", remote_file);
+        snprintf(local_file, sizeof(local_file), "downloads/%s", remote_file);
     } else {
         /* Interactive prompt */
         char input[256];
@@ -79,11 +79,11 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
 
-        printf("Enter destination file path [default downloaded_%s]: ", remote_file);
+        printf("Enter destination file path [default downloads/%s]: ", remote_file);
         if (fgets(input, sizeof(input), stdin)) {
             proto_strip_newline(input);
             if (strlen(input) > 0) snprintf(local_file, sizeof(local_file), "%s", input);
-            else snprintf(local_file, sizeof(local_file), "downloaded_%s", remote_file);
+            else snprintf(local_file, sizeof(local_file), "downloads/%s", remote_file);
         }
     }
 

@@ -16,3 +16,8 @@ build/
 *.log
 downloaded_*
 storage/downloaded_*
+
+# Client downloads directory (keep .gitkeep and README.md, ignore received files)
+downloads/*
+!downloads/.gitkeep
+!downloads/README.md

@@ -61,6 +61,7 @@ ctm: directories $(CTM_BIN)
 directories:
 	@mkdir -p $(BIN_DIR)
 	@mkdir -p $(BUILD_DIR)/common $(BUILD_DIR)/server $(BUILD_DIR)/client $(BUILD_DIR)/ftp $(BUILD_DIR)/ctm
+	@mkdir -p downloads storage
 
 # Compilation rules for object files
 $(BUILD_DIR)/common/%.o: $(SRC_DIR)/common/%.c

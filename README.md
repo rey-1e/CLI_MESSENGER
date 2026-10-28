@@ -1,243 +1,377 @@
-# Chat Messenger, Concurrent FTP & CTM CLI Suite
+# Operating Systems Networking Suite: Chat Messenger, Concurrent FTP & CTM CLI
 
-A high-performance, modular Linux system programming suite implemented in C. The repository features three complementary network subsystems:
-1. **Chat Messenger**: A full-duplex, peer-to-peer relay messaging service utilizing POSIX threads (`pthreads`) for non-blocking asynchronous transmission.
-2. **Concurrent FTP System**: A multi-client file transfer service employing process-based concurrency (`fork`) with chunked TCP streaming and protocol header verification.
-3. **CTM (Chat Messenger CLI)**: An asynchronous, Git-style command-line messenger powered by an auto-spawning background Linux daemon, Unix domain socket (`AF_UNIX`) IPC, and persistent kernel-locked (`flock`) conversation history.
+A modular, high-performance Linux system programming project implemented in C. Developed specifically for an **Operating Systems** curriculum, this codebase demonstrates core operating systems principles including **Client-Server Architecture**, **POSIX Multithreading (`pthreads`)**, **Multiprocessing Concurrency (`fork`)**, **Inter-Process Communication (`AF_UNIX` sockets)**, **Kernel Advisory File Locking (`flock`)**, and **Background Daemonization**.
 
 ---
 
-## Architecture Overview
+## Table of Contents
+
+- [Architectural Overview](#architectural-overview)
+  - [1. Client-Server Chat Relay Server](#1-client-server-chat-relay-server)
+  - [2. Concurrent Multi-Process FTP Server](#2-concurrent-multi-process-ftp-server)
+  - [3. Asynchronous P2P Daemon Suite (CTM)](#3-asynchronous-p2p-daemon-suite-ctm)
+- [File Storage Architecture Guide](#file-storage-architecture-guide)
+- [Operating Systems Concepts Implemented](#operating-systems-concepts-implemented)
+- [Project Directory Structure](#project-directory-structure)
+- [Build Instructions](#build-instructions)
+- [Execution & Usage Guide](#execution--usage-guide)
+  - [1. Client-Server Chat Relay](#1-running-the-client-server-chat-relay)
+  - [2. Concurrent FTP File Transfer](#2-running-the-concurrent-ftp-system)
+  - [3. CTM (Git-Style Daemon Messenger)](#3-running-the-ctm-asynchronous-suite)
+- [Protocol Specifications](#protocol-specifications)
+- [Documentation & Reports](#documentation--reports)
+
+---
+
+## Architectural Overview
+
+This project includes three complementary networking subsystems, contrasting traditional **Client-Server coordination** with **Concurrent multi-process file distribution** and **Asynchronous daemonized peer-to-peer communication**:
 
 ```mermaid
 flowchart TD
-    subgraph Chat_Messenger["Chat Messenger Architecture"]
-        C1["Chat Client 1 (Threaded Send/Recv)"] <-->|"TCP (Port 8080)"| S["Chat Relay Server"]
-        S <-->|"TCP (Port 8080)"| C2["Chat Client 2 (Threaded Send/Recv)"]
-        S --- T1["Relay Worker Thread (C1 -> C2)"]
-        S --- T2["Relay Worker Thread (C2 -> C1)"]
+    subgraph Client_Server_Relay["1. Client-Server Architecture (Chat Relay)"]
+        direction TB
+        C1["Chat Client 1 (Threaded)"] <-->|"TCP Socket (Port 8080)"| RS["Central Relay Server (chat_server)"]
+        RS <-->|"TCP Socket (Port 8080)"| C2["Chat Client 2 (Threaded)"]
+        RS --- T1["Relay Worker Thread (C1 -> C2)"]
+        RS --- T2["Relay Worker Thread (C2 -> C1)"]
     end
 
-    subgraph FTP_System["Concurrent FTP Architecture"]
-        FC1["FTP Client 1"] -->|"Request File\n(Port 9000)"| FS["Master FTP Server"]
-        FC2["FTP Client 2"] -->|"Request File\n(Port 9000)"| FS
-        FS -->|"fork()"| W1["Child Process 1 (Stream Chunks)"]
-        FS -->|"fork()"| W2["Child Process 2 (Stream Chunks)"]
-        W1 -.->|"Header + Data"| FC1
-        W2 -.->|"Header + Data"| FC2
+    subgraph Concurrent_FTP["2. Client-Server File Architecture (Concurrent FTP)"]
+        direction TB
+        FC1["FTP Client 1"] -->|"TCP Request (Port 9000)"| MFS["Master FTP Server (ftp_server)"]
+        FC2["FTP Client 2"] -->|"TCP Request (Port 9000)"| MFS
+        MFS -->|"fork() Child 1"| W1["Child Process 1"]
+        MFS -->|"fork() Child 2"| W2["Child Process 2"]
+        W1 -->|"Reads storage/ | Streams"| FC1
+        W2 -->|"Reads storage/ | Streams"| FC2
+        FC1 -.->|"Writes"| D1["downloads/ (Client Storage)"]
+        FC2 -.->|"Writes"| D2["downloads/ (Client Storage)"]
+    end
+
+    subgraph CTM_Daemon["3. Asynchronous P2P Daemon Architecture (CTM)"]
+        direction TB
+        CLI["ctm CLI (User)"] <-->|"Unix Domain Socket (AF_UNIX)"| DMN["Background Daemon (fork + setsid)"]
+        DMN <-->|"TCP Socket"| PEER["Remote Peer Daemon"]
+        DMN -->|"Atomic flock()"| LOG["~/.ctm/history.log"]
     end
 ```
 
 ---
 
-## Project Structure
+### 1. Client-Server Chat Relay Server
+*Implemented in: `src/server/` (`relay.c`, `server_main.c`) and `src/client/` (`chat_client.c`, `client_main.c`)*
+
+The Chat Messenger implements classic **Client-Server Architecture**:
+- **Central Coordinator (`chat_server`)**: A centralized daemon socket binds and listens on port 8080. It manages client registration and connection handshakes.
+- **Bi-directional Relaying**: Rather than requiring direct network connectivity between clients (which fails behind NATs and firewalls), the server bridges the two client sockets.
+- **POSIX Multithreading**: The server provisions worker threads via `pthread_create()` to asynchronously forward messages between `Client 1` and `Client 2` with zero head-of-line blocking.
+- **Poll-Driven Handshakes**: Uses non-blocking multiplexed I/O (`poll()`) to detect client drops before the peer even joins.
+
+---
+
+### 2. Concurrent Multi-Process FTP Server
+*Implemented in: `src/ftp/` (`ftp_server.c`, `ftp_server_main.c`, `ftp_client.c`, `ftp_client_main.c`)*
+
+The File Transfer System implements a **process-per-client concurrency model**:
+- **Master Listener Process**: Runs an accept loop on port 9000.
+- **Process Spawning via `fork()`**: Upon each incoming connection, the master server forks a dedicated child process. The child immediately inherits the client socket descriptor, closes the listening socket, streams the requested file, and terminates cleanly (`_exit(0)`).
+- **Process Isolation**: Memory spaces are completely isolated by the OS virtual memory management system; a crash or slowdown in one client worker never affects other active transfers.
+- **Zombie Prevention**: The master process registers `signal(SIGCHLD, SIG_IGN)` to instruct the Linux kernel to immediately reap child processes upon termination, eliminating `<defunct>` zombie processes.
+
+---
+
+### 3. Asynchronous P2P Daemon Suite (CTM)
+*Implemented in: `src/ctm/` (`ctm_main.c`, `ctm_daemon.c`, `ctm_ipc.c`, `ctm_storage.c`)*
+
+CTM provides a Git-style CLI (`ctm text`, `ctm updates`, `ctm log`, `ctm send-file`, `ctm fetch`) powered by:
+- **Zero-Configuration Daemonization**: Auto-spawns into the background using double-`fork()` and `setsid()`.
+- **Local IPC**: The CLI talks to the local background daemon across high-speed Unix Domain Sockets (`AF_UNIX`).
+- **Kernel Advisory Locking (`flock`)**: Atomically writes conversation logs using `flock(LOCK_EX)`, preventing race conditions across concurrent commands.
+
+---
+
+## File Storage Architecture Guide
+
+To ensure complete conceptual clarity, file storage in this repository is strictly decoupled between the **Server** and the **Client**:
 
 ```
 Chat_Messenger/
-├── .gitignore               # Excludes build artifacts and binaries
-├── Makefile                 # Modular build automation
-├── README.md                # Project documentation and user guide
-├── docs/
-│   └── Documentation.pdf    # Original architecture specifications
-├── include/
-│   ├── chat_client.h        # Client worker threads and session context
-│   ├── chat_server.h        # Server relay engine and session management
-│   ├── common.h             # Shared constants, macros, headers, and loggers
-│   ├── ftp.h                # FTP file transfer protocol and interfaces
-│   ├── network.h            # Socket connection, bind, listen, and port cleanup
-│   └── protocol.h           # Safe I/O, line parsing, and buffer transmission
-├── src/
-│   ├── common/
-│   │   ├── network.c        # TCP socket creation, reuseaddr, connection helpers
-│   │   └── protocol.c       # proto_read_line, proto_send_all, proto_recv_all
-│   ├── server/
-│   │   ├── relay.c          # Bidirectional peer forwarding and disconnect sync
-│   │   └── server_main.c    # Chat server CLI entry point and signal handling
-│   ├── client/
-│   │   ├── chat_client.c    # Multithreaded send and receive workers
-│   │   └── client_main.c    # Chat client entry point and user config
-│   └── ftp/
-│       ├── ftp_client.c     # Header verification and file chunk receiver
-│       ├── ftp_client_main.c# FTP client CLI entry point
-│       ├── ftp_server.c     # File validation and chunked stream sender
-│       └── ftp_server_main.c# Concurrent fork-based daemon and child reaper
-└── storage/
-    ├── demo.txt             # Sample text asset for file transfer testing
-    └── image.jpg            # Sample binary image asset for transfer testing
+│
+├── storage/                 ◄── [SERVER STORAGE REPOSITORY]
+│   ├── README.md            # Documentation on server-side hosting & file isolation
+│   ├── demo.txt             # Text/code sample file (ASCII stream test)
+│   └── image.jpg            # Binary JPEG image sample (binary chunked stream test)
+│
+└── downloads/               ◄── [CLIENT DOWNLOAD DESTINATION]
+    ├── .gitkeep             # Preserves empty downloads directory in Git
+    ├── README.md            # Guide on client reception and diff verification
+    └── (received files)     # Downloaded client files land here (ignored by git)
 ```
+
+### 1. Server Storage (`storage/`)
+- **Role**: Authoritative server-side repository hosted by `bin/ftp_server`.
+- **How to Host Files**: Simply copy or move any file into `storage/` (e.g. `cp my_presentation.pdf storage/`). The FTP server serves it immediately without restarts.
+- **Security & Path Traversal**: In accordance with OS security principles, the server validates every requested filename. Requests containing `..` or leading `/` are rejected with `ERR` to prevent directory traversal.
+
+### 2. Client Storage (`downloads/`)
+- **Role**: Local storage space where `bin/ftp_client` writes retrieved data streams.
+- **Decoupling**: By saving incoming files to `downloads/` instead of `storage/`, the server's authoritative assets remain clean and untainted.
+- **Integrity Verification**: Transferred files can be verified against the original via:
+  ```bash
+  diff storage/demo.txt downloads/demo.txt
+  # No output indicates a bit-for-bit identical transfer!
+  ```
+
+### 3. CTM Persistent Storage (`~/.ctm/<username>/`)
+For the asynchronous CTM tool, persistent user data is saved under the user's home directory:
+- `~/.ctm/<user>/history.log`: Chat history, protected by `flock(LOCK_EX)` for atomic appends.
+- `~/.ctm/<user>/outbox.log`: Stored messages awaiting delivery.
+- `~/.ctm/<user>/config`: Peer IP addresses, ports, and identities.
+- `~/.ctm/<user>/downloads/`: Files received via peer-to-peer file transfer (`ctm send-file`).
 
 ---
 
-## Key Features & Design Principles
+## Operating Systems Concepts Implemented
 
-- **Separation of Concerns**: Networking logic, wire protocol, application workers, and entry points are cleanly split into modular source and header files.
-- **Multithreading with POSIX Threads**: The chat client and relay server run dedicated sender and receiver threads, eliminating blocking I/O bottlenecks.
-- **Process Concurrency with `fork()`**: The FTP server isolates each client connection inside an independent child process, guaranteeing parallel transfer capacity without thread contention.
-- **Zombie Process Prevention**: Child processes are automatically reaped using `signal(SIGCHLD, SIG_IGN)` to prevent lingering `<defunct>` states.
-- **Robust Error & Signal Safety**:
-  - `SIGINT` (Ctrl+C) is handled safely using async-signal-safe primitives (`write(2)` and `_exit(2)`).
-  - Port conflicts are mitigated using `SO_REUSEADDR` / `SO_REUSEPORT` alongside port cleanup helpers.
-  - Sockets and file descriptors are systematically cleaned up on disconnects to eliminate resource leaks.
-- **Buffer Safety**: Eliminates buffer overflows by utilizing bounded formatting (`snprintf`) and custom bounded line-reading (`proto_read_line`).
+| OS Concept | System Calls / Primitives Used | Code Location | Description |
+|---|---|---|---|
+| **Client-Server Model** | `socket()`, `bind()`, `listen()`, `accept()`, `connect()` | `src/server/`, `src/client/`, `src/ftp/` | Centralized relay coordinator and concurrent FTP file server architectures. |
+| **Multithreading** | `pthread_create()`, `pthread_join()`, `pthread_t` | `src/client/chat_client.c`, `src/server/relay.c` | Independent asynchronous send/receive execution threads to avoid I/O blocking. |
+| **Process Concurrency** | `fork()`, `_exit()`, `pid_t` | `src/ftp/ftp_server_main.c`, `src/ctm/ctm_daemon.c` | Independent child worker processes spawned per connection for concurrent file streaming. |
+| **Zombie Prevention** | `signal(SIGCHLD, SIG_IGN)` | `src/ftp/ftp_server_main.c` | Kernel-level automatic process table reaping to eliminate `<defunct>` processes. |
+| **Inter-Process Comm (IPC)** | `socket(AF_UNIX, SOCK_STREAM)`, `struct sockaddr_un` | `src/ctm/ctm_ipc.c` | Low-latency local communication between CLI frontend and background daemon. |
+| **File Locking** | `flock()`, `LOCK_EX`, `LOCK_SH`, `LOCK_UN` | `src/ctm/ctm_storage.c` | Kernel-level advisory locking ensuring atomicity during concurrent file operations. |
+| **Daemonization** | `fork()`, `setsid()`, `freopen()`, `chdir()` | `src/ctm/ctm_daemon.c` | Detaches processes from controlling terminal sessions into true background services. |
+| **I/O Multiplexing** | `poll()`, `struct pollfd`, `POLLIN`, `POLLHUP` | `src/server/relay.c`, `src/ctm/ctm_daemon.c` | Non-blocking event-driven monitoring of multiple socket file descriptors. |
+| **Async-Signal Safety** | `signal(SIGINT)`, `write(2)`, `_exit(2)` | `src/server/server_main.c`, `src/ftp/ftp_server_main.c` | Avoids deadlocks by restricting signal handlers exclusively to async-safe primitives. |
+| **Socket Options & Policies** | `setsockopt()`, `SO_REUSEADDR`, `SO_REUSEPORT` | `src/common/network.c` | Eliminates TCP `TIME_WAIT` rebind delays and enables clean server restarts. |
+| **SIGPIPE Suppression** | `MSG_NOSIGNAL`, `signal(SIGPIPE, SIG_IGN)` | `src/common/protocol.c` | Prevents process termination when writing to abruptly closed network sockets. |
+| **File System Security** | `open(O_RDONLY)`, `stat()`, `S_ISREG` | `src/ftp/ftp_server.c` | Sanitizes input paths against directory traversal (`..`) and checks regular file flags. |
+| **Chunked Streaming** | `read(2)`, `write(2)`, `send()`, `recv()` | `src/ftp/ftp_server.c`, `src/ftp/ftp_client.c` | High-throughput 1024-byte chunked TCP streaming with complete EOF propagation. |
+| **Safe Framing** | `proto_read_line()`, `snprintf()` | `src/common/protocol.c` | Eliminates buffer overflow risks via strictly bounded character consumption. |
+
+---
+
+## Project Directory Structure
+
+```
+Chat_Messenger/
+├── Makefile                 # Modular build automation with clean separation of targets
+├── README.md                # Comprehensive documentation and OS concept mapping
+├── .gitignore               # Excludes binaries, build objects, and temporary downloads
+│
+├── docs/                    # Academic Documentation
+│   ├── Chat_Messenger_Project_Report.docx  # 15-page OS Academic Technical Report
+│   └── Documentation.pdf                  # Original architecture specifications
+│
+├── include/                 # Header Declarations & Interfaces
+│   ├── common.h             # Shared constants, ANSI colors, loggers, buffer bounds
+│   ├── chat_server.h        # Relay server function declarations and state structs
+│   ├── chat_client.h        # Chat client worker thread signatures
+│   ├── ftp.h                # Concurrent FTP server/client interfaces & wire protocol
+│   ├── ctm.h                # CTM daemon, IPC, and persistent storage prototypes
+│   ├── network.h            # Socket creation, bind, reuseaddr, and port cleanup
+│   └── protocol.h           # Bounded line-reading and byte transmission wrappers
+│
+├── src/                     # C Source Implementations
+│   ├── common/              # Shared Subsystem Utilities
+│   │   ├── network.c        # TCP socket wrappers, port reuse options, cleanup
+│   │   └── protocol.c       # Safe framed I/O (proto_read_line, proto_send_all)
+│   ├── server/              # Centralized Relay Server Subsystem
+│   │   ├── relay.c          # Bidirectional message forwarding & client sync
+│   │   └── server_main.c    # Chat server CLI entry point & SIGINT handling
+│   ├── client/              # Chat Client Subsystem
+│   │   ├── chat_client.c    # Multithreaded sender and receiver worker threads
+│   │   └── client_main.c    # Chat client entry point and connection setup
+│   ├── ftp/                 # Concurrent Multi-Process FTP Subsystem
+│   │   ├── ftp_server.c     # Path sanitization, header transmission, chunk streaming
+│   │   ├── ftp_server_main.c# Master server daemon, fork() child spawning, zombie reaping
+│   │   ├── ftp_client.c     # Header verification and chunk-to-disk receiver
+│   │   └── ftp_client_main.c# FTP client CLI entry point (defaults to downloads/)
+│   └── ctm/                 # Asynchronous Daemon & P2P CLI Subsystem
+│       ├── ctm_main.c       # Git-style CLI commands (text, updates, log, send-file)
+│       ├── ctm_daemon.c     # Background service worker (fork + setsid, socket loop)
+│       ├── ctm_ipc.c        # AF_UNIX local IPC client/server implementation
+│       └── ctm_storage.c    # Kernel flock() file operations & config loading
+│
+├── storage/                 # Server-Side File Storage Repository
+│   ├── README.md            # Storage documentation and hosting instructions
+│   ├── demo.txt             # Sample ASCII source file for transfer validation
+│   └── image.jpg            # Sample binary JPEG image for transfer validation
+│
+└── downloads/               # Client-Side Download Directory
+    ├── .gitkeep             # Git directory placeholder
+    └── README.md            # Client download instructions and diff validation guide
+```
 
 ---
 
 ## Build Instructions
 
 ### Prerequisites
-- Linux OS (Ubuntu 20.04+, Debian, Arch, Fedora, etc.)
-- GCC (`gcc`)
-- Make (`make`)
-- POSIX Threads Library (`libpthread`)
+- **Operating System**: Linux (Ubuntu, Debian, Fedora, Arch, CentOS, etc.)
+- **Compiler**: GCC (`gcc`) with C99 or C11 support
+- **Build Tool**: GNU Make (`make`)
+- **System Libraries**: POSIX Threads (`-pthread`)
 
-### Compilation Commands
+### Compilation Targets
 
-| Command | Action |
-|---|---|
-| `make` or `make all` | Builds all 4 binaries into `bin/` |
-| `make chat` | Builds `bin/chat_server` and `bin/chat_client` |
-| `make ftp` | Builds `bin/ftp_server` and `bin/ftp_client` |
-| `make clean` | Removes all compiled objects (`build/`) and binaries (`bin/`) |
-| `make help` | Displays build targets and usage options |
+```bash
+# Build all binaries into bin/
+make
+
+# Build individual subsystems:
+make chat        # Builds bin/chat_server and bin/chat_client (Client-Server Relay)
+make ftp         # Builds bin/ftp_server and bin/ftp_client (Concurrent FTP)
+make ctm         # Builds bin/ctm (Git-style asynchronous CLI tool)
+
+# Install ctm globally to ~/.local/bin/
+make install
+
+# Clean all compiled object files and binaries
+make clean
+
+# Display available make targets
+make help
+```
 
 ---
 
-## Usage Guide
+## Execution & Usage Guide
 
-### 1. Chat Messenger
+### 1. Running the Client-Server Chat Relay
 
-The chat service pairs two clients via the relay server for bidirectional live conversation.
+The Relay Server operates as the central coordinator, connecting two remote clients for bidirectional conversation over TCP.
 
-#### Terminal 1 — Start Server
+#### Step 1: Start the Relay Server
 ```bash
 ./bin/chat_server 8080
 ```
-*Note: If no port is passed, you will be prompted interactively (default: `8080`).*
+*The server initializes on port 8080 and waits for clients to connect.*
 
-#### Terminal 2 — Connect First Client (Alice)
+#### Step 2: Connect Client 1 (Alice)
+In a second terminal:
 ```bash
 ./bin/chat_client 127.0.0.1 8080 Alice
 ```
-*Alice receives a notice: `Connected as Client 1. Waiting for peer to join...`*
+*Alice receives notice: `Connected as Client 1. Waiting for peer to join...`*
 
-#### Terminal 3 — Connect Second Client (Bob)
+#### Step 3: Connect Client 2 (Bob)
+In a third terminal:
 ```bash
 ./bin/chat_client 127.0.0.1 8080 Bob
 ```
 *Both clients are notified: `Peer joined! Chat starting!`*
 
-#### Interactive Chat
-- Simply type your message and press **ENTER**.
-- Messages appear in the format: `[Username]: [Message]`.
-- Type `/exit` or `/quit` to gracefully leave the conversation.
+#### Interactive Chatting
+- Type any message and press **ENTER**.
+- Messages are formatted as `[Username]: [Message]`.
+- Type `/exit` or `/quit` to gracefully disconnect. The server detects the disconnect and safely notifies the peer.
 
 ---
 
-### 2. Concurrent FTP File Transfer
+### 2. Running the Concurrent FTP System
 
-The FTP service serves files located inside the `storage/` directory over TCP.
+The FTP system demonstrates multiprocessing concurrency with `fork()` and chunked streaming from `storage/` to `downloads/`.
 
-#### Terminal 1 — Start FTP Server
+#### Step 1: Start the Concurrent FTP Server
 ```bash
 ./bin/ftp_server 9000
 ```
-*The FTP server begins listening on port 9000 and prepares to serve files from `storage/`.*
+*The server starts listening on port 9000 and serves all files inside `storage/`.*
 
-#### Terminal 2 — Download File via FTP Client
+#### Step 2: Download a Text File (Client)
+In a separate terminal:
 ```bash
-# Syntax: ./bin/ftp_client <server_ip> <port> <remote_filename> <local_filename>
-./bin/ftp_client 127.0.0.1 9000 demo.txt storage/downloaded_demo.txt
+./bin/ftp_client 127.0.0.1 9000 demo.txt
 ```
+*The client requests `demo.txt`. The server forks a child process to stream the file. The client saves it into `downloads/demo.txt`.*
 
-#### Transfer Verification
+#### Step 3: Download a Binary Image File (Client)
 ```bash
-diff storage/demo.txt storage/downloaded_demo.txt
-# No differences means the file was transferred with 100% integrity
+./bin/ftp_client 127.0.0.1 9000 image.jpg
 ```
+*The binary image is chunk-streamed and written to `downloads/image.jpg`.*
+
+#### Step 4: Verify Transfer Integrity
+```bash
+diff storage/demo.txt downloads/demo.txt
+diff storage/image.jpg downloads/image.jpg
+```
+*Zero diff output confirms 100% byte-for-byte transmission integrity.*
 
 ---
 
-### 3. CTM (Git-Style Asynchronous CLI Messenger)
+### 3. Running the CTM Asynchronous Suite
 
-CTM provides an asynchronous terminal workflow (`ctm text`, `ctm updates`, `ctm log`, `ctm send-file`, `ctm fetch`). It requires **zero manual server startup** — the background daemon auto-spawns via `fork()` + `setsid()` and saves persistent chat history with kernel file locking (`flock`).
+CTM provides asynchronous terminal messaging without keeping terminal windows open. The background daemon auto-starts and manages message persistence with `flock()`.
 
-#### Quick Setup & Installation
+#### Configuration
 ```bash
-make install
-# Installs 'ctm' binary to ~/.local/bin/ctm
+# Configure Alice:
+ctm config --name Alice --peer Bob --peer-ip 127.0.0.1
+
+# Configure Bob (or test on single machine with --user flag):
+ctm --user Bob config --name Bob --peer Alice --peer-ip 127.0.0.1
 ```
 
-#### Commands & Examples
-
-**1. Configure peer identity:**
+#### Core Workflow Commands
 ```bash
-# On Alice's machine:
-ctm config --name Alice --peer Bob --peer-ip 192.168.1.25
+# 1. Send an asynchronous message (returns immediately):
+ctm text Bob -m "Operating Systems project is ready!"
 
-# On Bob's machine:
-ctm config --name Bob --peer Alice --peer-ip 192.168.1.10
-```
-
-**2. Send a message (returns immediately):**
-```bash
-ctm text Bob -m "I'm working on the project!"
-# [ctm] Message delivered to Bob.
-```
-
-**3. Check for unread message notifications:**
-```bash
-ctm updates
-# [ctm] 1 unread message from Alice
-# Last: "I'm working on the project!"
-```
-
-**4. View conversation history (marks unread as read):**
-```bash
-ctm log -n 10
-# --- Conversation History (Bob & Alice) ---
-# [22:50] Alice : I'm working on the project!
-# [22:51] Bob   : Awesome! I just finished the test suite.
-```
-
-**5. Send a file without opening a server:**
-```bash
-ctm send-file Bob storage/demo.txt
-# [ctm] Sent file 'demo.txt' (4470 bytes) to Bob.
-```
-
-**6. View downloaded files:**
-```bash
-ctm fetch
-# Received Files in '~/.ctm/Bob/downloads/':
-#   • demo.txt                       (4470 bytes)
-```
-
-**7. Single-machine testing:**
-You can test both Alice and Bob simultaneously on a single laptop using the `--user` flag:
-```bash
-ctm --user Alice text Bob -m "Hello from Alice!"
+# 2. Check for unread message notifications:
 ctm --user Bob updates
-ctm --user Bob log
-ctm --user Bob text Alice -m "Hello back from Bob!"
+# [ctm] 1 unread message from Alice
+# Last: "Operating Systems project is ready!"
+
+# 3. View conversation history (marks unread messages as read):
+ctm --user Bob log -n 10
+
+# 4. Send a file via background daemon:
+ctm send-file Bob storage/demo.txt
+
+# 5. List received files in downloads directory:
+ctm --user Bob fetch
 ```
 
 ---
 
 ## Protocol Specifications
 
-### Chat Protocol
+### 1. Chat Relay Wire Protocol
 - **Transport**: TCP Stream (`SOCK_STREAM`)
-- **Framing**: UTF-8 line-delimited text (`\n`)
-- **Payload**: `<Username>: <Message>\n`
+- **Framing**: UTF-8 line-delimited text terminated by newline (`\n`).
+- **Payload Format**: `[Sender]: [Message]\n`
+- **Control Sequences**: `/exit\n`, `/quit\n`
 
-### FTP Wire Protocol
-1. **Client Request**: Client transmits target filename followed by `\n` (e.g. `image.jpg\n`).
+### 2. Concurrent FTP Wire Protocol
+1. **Client Request**: Transmits requested filename followed by newline:
+   ```
+   demo.txt\n
+   ```
 2. **Server Handshake**:
-   - Success: `OK <file_size_in_bytes>\n` (e.g. `OK 20141\n`)
-   - Failure: `ERR\n` (e.g. file not found, permission denied, path traversal blocked)
-3. **Data Phase**: The server streams exactly `<file_size_in_bytes>` binary bytes in 1024-byte chunks directly to the client socket, followed by socket closure.
+   - On success: `OK <file_size_in_bytes>\n` (e.g. `OK 4470\n`)
+   - On error: `ERR\n` (e.g. file not found, permission denied, or path traversal attempt)
+3. **Data Streaming Phase**: The server streams exactly `<file_size_in_bytes>` binary bytes in 1024-byte chunks directly to the client socket, followed by socket closure.
+
+### 3. CTM Local IPC Protocol
+- **Transport**: Unix Domain Stream Socket (`AF_UNIX`) at `/tmp/ctm_<username>.sock`
+- **Commands**: `SEND <peer> <msg>`, `STATUS`, `LOG <lines>`, `SENDFILE <peer> <path>`
+- **Response**: Immediate structured status code followed by data payload.
 
 ---
 
-## License & Credits
-Developed as part of the Linux System Programming & Socket Networking projects.
+## Documentation & Reports
+
+Comprehensive academic documentation is located in the `docs/` directory:
+- [`docs/Chat_Messenger_Project_Report.docx`](file:///home/rey_/Chat_Messenger/docs/Chat_Messenger_Project_Report.docx): Complete 15-page Operating Systems project technical report detailing thread synchronization, fork concurrency, socket architecture, and benchmarking.
+- [`docs/Documentation.pdf`](file:///home/rey_/Chat_Messenger/docs/Documentation.pdf): Original architecture specification and project design document.
+- [`storage/README.md`](file:///home/rey_/Chat_Messenger/storage/README.md): Detailed guide on server-side file repository management and security.
+- [`downloads/README.md`](file:///home/rey_/Chat_Messenger/downloads/README.md): Detailed guide on client download destination and diff verification.
+
+---
+
+## Authors & Academic Credits
+Implemented in C for Linux Systems Programming & Operating Systems Coursework.
